@@ -1,0 +1,7 @@
+---
+# Template A: job_type=check + diff -> plan.   Template B: job_type=run -> apply.
+- name: Apply labels, ports and booleans (still permissive)
+  hosts: "{{ ring | default('rhel_nodes') }}"
+  become: true
+  serial: "{{ batch_size | default('50%') }}"
+  roles: [selinux_remediate]

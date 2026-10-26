@@ -1,0 +1,5 @@
+---
+selinux_gate_since: this-hour
+selinux_force: false
+health_retries: 6
+health_delay: 5

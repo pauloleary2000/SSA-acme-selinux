@@ -1,0 +1,15 @@
+module acme_legacy 1.0.0;
+
+# ILLUSTRATIVE legacy-app module. In practice: reproduce the denial in permissive,
+# read it with `ausearch -m avc -ts recent | audit2allow -R` (explain only), keep the
+# minimum rules, then replace broad types with a dedicated domain where possible.
+require {
+    type httpd_t;
+    type httpd_var_run_t;
+    type unconfined_service_t;
+    class sock_file write;
+    class unix_stream_socket connectto;
+}
+
+allow httpd_t httpd_var_run_t:sock_file write;
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;

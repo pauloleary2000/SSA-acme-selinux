@@ -1,0 +1,51 @@
+---
+- name: Remove module
+  ansible.builtin.command: semodule -r {{ mod.name }}
+  when: mod.state | default('present') == 'absent' and mod.name in _loaded.stdout_lines | map('split') | map('first')
+  changed_when: true
+
+- name: Build and install from source (lab)
+  when: mod.state | default('present') == 'present' and selinux_module_mode == 'build_on_host'
+  block:
+    - name: Copy type enforcement source
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../policy/{{ mod.name }}.te"
+        dest: "{{ selinux_module_staging }}/{{ mod.name }}.te"
+        mode: "0640"
+      register: _te
+
+    - name: Check for compiled package
+      ansible.builtin.stat:
+        path: "{{ selinux_module_staging }}/{{ mod.name }}.pp"
+      register: _pp
+
+    - name: Compile (checkmodule + semodule_package)
+      ansible.builtin.shell: |
+        set -e
+        cd {{ selinux_module_staging }}
+        checkmodule -M -m -o {{ mod.name }}.mod {{ mod.name }}.te
+        semodule_package -o {{ mod.name }}.pp -m {{ mod.name }}.mod
+      when: _te.changed or not _pp.stat.exists
+      register: _compiled
+      changed_when: true
+
+    - name: Install module
+      ansible.builtin.command: semodule -i {{ selinux_module_staging }}/{{ mod.name }}.pp
+      when: _compiled is changed or mod.name not in _loaded.stdout_lines | map('split') | map('first')
+      changed_when: true
+
+- name: Install prebuilt package from CI artifact (production)
+  when: mod.state | default('present') == 'present' and selinux_module_mode == 'prebuilt'
+  block:
+    - name: Download .pp with checksum verification
+      ansible.builtin.get_url:
+        url: "{{ mod.url }}"
+        dest: "{{ selinux_module_staging }}/{{ mod.name }}.pp"
+        checksum: "sha256:{{ mod.sha256 }}"
+        mode: "0640"
+      register: _dl
+
+    - name: Install module
+      ansible.builtin.command: semodule -i {{ selinux_module_staging }}/{{ mod.name }}.pp
+      when: _dl is changed or mod.name not in _loaded.stdout_lines | map('split') | map('first')
+      changed_when: true

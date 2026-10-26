@@ -1,0 +1,8 @@
+---
+- name: Install SELinux watch rules for auditd
+  ansible.builtin.copy:
+    src: 90-selinux-drift.rules
+    dest: /etc/audit/rules.d/90-selinux-drift.rules
+    owner: root
+    mode: "0640"
+  notify: load audit rules

@@ -1,0 +1,7 @@
+---
+- name: Enforce ring by ring with health gates and automatic safety net
+  hosts: "{{ ring | default('ring_canary') }}"
+  become: true
+  serial: "{{ batch_size | default('20%') }}"
+  max_fail_percentage: 5
+  roles: [selinux_enforce]

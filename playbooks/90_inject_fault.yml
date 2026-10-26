@@ -1,0 +1,29 @@
+---
+# Demo helper: simulate a regression. Pass -e fault=log_label|port|boolean|socket
+- name: Inject a SELinux fault for the live troubleshooting demo
+  hosts: "{{ ring | default('web') }}"
+  become: true
+  tasks:
+    - name: Log directory loses its mapping
+      when: fault == 'log_label'
+      block:
+        - community.general.sefcontext: { target: "/srv/webapp/logs(/.*)?", setype: httpd_log_t, state: absent }
+        - ansible.builtin.command: restorecon -RF /srv/webapp/logs
+          changed_when: true
+        - ansible.builtin.systemd: { name: httpd, state: restarted }
+
+    - name: Custom port loses its type
+      when: fault == 'port'
+      block:
+        - community.general.seport: { ports: "8480", proto: tcp, setype: http_port_t, state: absent }
+        - ansible.builtin.systemd: { name: httpd, state: restarted }
+          ignore_errors: true
+
+    - name: DB connect boolean turned off
+      when: fault == 'boolean'
+      ansible.posix.seboolean: { name: httpd_can_network_connect_db, state: false, persistent: true }
+
+    - name: Socket directory label drift
+      when: fault == 'socket'
+      ansible.builtin.command: chcon -R -t var_run_t /run/webapp
+      changed_when: true

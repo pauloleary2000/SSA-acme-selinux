@@ -1,0 +1,10 @@
+---
+# community.general (sefcontext, seport, selinux_permissive) is not in the certified
+# supported EE, so build a custom EE. Alternative: use the supported
+# redhat.rhel_system_roles.selinux role, which covers the same objects.
+version: 3
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-25/ee-supported-rhel9:latest
+dependencies:
+  galaxy: ../collections/requirements.yml

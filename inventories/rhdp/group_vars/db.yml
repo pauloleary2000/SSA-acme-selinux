@@ -1,0 +1,8 @@
+---
+health_cmd: pg_isready -p 5433
+selinux_fcontexts:
+  - { path: /data/pgsql, type: postgresql_db_t }
+  - { path: /var/log/pgsql-custom, type: postgresql_log_t }
+selinux_ports:
+  - { port: 5433, proto: tcp, type: postgresql_port_t }
+selinux_booleans: []

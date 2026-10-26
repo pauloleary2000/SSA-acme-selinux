@@ -1,0 +1,93 @@
+---
+- name: Ensure SELinux management tooling
+  ansible.builtin.dnf:
+    name: [policycoreutils-python-utils, python3-libselinux, python3-policycoreutils]
+    state: present
+
+- name: Merge base vars with live-fix overrides
+  ansible.builtin.set_fact:
+    _fc: "{{ selinux_fcontexts + selinux_fcontexts_extra }}"
+    _ports: "{{ selinux_ports + selinux_ports_extra }}"
+    _bools: "{{ selinux_booleans + selinux_booleans_extra }}"
+
+# ---- Plan (read-only, correct in check mode and visible in job output) ----
+- name: Read local fcontext customizations
+  ansible.builtin.command: semanage fcontext -l -C
+  register: _loc_fc
+  changed_when: false
+  check_mode: false
+
+- name: Read local port customizations
+  ansible.builtin.command: semanage port -l -C
+  register: _loc_ports
+  changed_when: false
+  check_mode: false
+
+- name: Show what this run will change
+  ansible.builtin.debug:
+    msg:
+      fcontexts_to_add: "{{ _fc | rejectattr('path', 'in', _loc_fc.stdout) | map(attribute='path') | list }}"
+      ports_to_add: "{{ _ports | rejectattr('port', 'in', _loc_ports.stdout) | map(attribute='port') | list }}"
+      booleans_to_set: "{{ _bools | map(attribute='name') | list }}"
+
+# ---- Apply ----
+- name: File context mappings (sefcontext)
+  community.general.sefcontext:
+    target: "{{ item.path }}(/.*)?"
+    setype: "{{ item.type }}"
+    state: present
+  loop: "{{ _fc }}"
+  loop_control: { label: "{{ item.path }} -> {{ item.type }}" }
+
+- name: Network port definitions (seport)
+  community.general.seport:
+    ports: "{{ item.port }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    setype: "{{ item.type }}"
+    state: present
+  loop: "{{ _ports }}"
+  loop_control: { label: "{{ item.proto | default('tcp') }}/{{ item.port }} -> {{ item.type }}" }
+
+- name: System booleans (seboolean, persistent)
+  ansible.posix.seboolean:
+    name: "{{ item.name }}"
+    state: "{{ item.state | default(true) }}"
+    persistent: true
+  loop: "{{ _bools }}"
+  loop_control: { label: "{{ item.name }}={{ item.state | default(true) }}" }
+
+- name: Per-domain permissive bridge (only these domains stay unenforced)
+  community.general.selinux_permissive:
+    name: "{{ item }}"
+    permissive: true
+  loop: "{{ selinux_permissive_domains }}"
+
+- name: tmpfiles.d entries so dynamic run directories are created with the right label
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/acme-selinux.conf
+    mode: "0644"
+    content: |
+      {% for t in selinux_tmpfiles %}
+      d {{ t.path }} {{ t.mode | default('0755') }} {{ t.owner }} {{ t.group }} -
+      {% endfor %}
+  when: selinux_tmpfiles | length > 0
+  notify: apply tmpfiles
+
+- name: Run handlers before relabeling
+  ansible.builtin.meta: flush_handlers
+
+# ---- Relabel: preview first (works in check mode), then apply ----
+- name: Preview relabel (restorecon -n)
+  ansible.builtin.command: restorecon -RFnv {{ item.path }}
+  loop: "{{ _fc }}"
+  loop_control: { label: "{{ item.path }}" }
+  register: _relabel
+  changed_when: _relabel.stdout | length > 0
+  failed_when: _relabel.rc != 0 and 'No such file' not in _relabel.stderr
+  check_mode: false
+
+- name: Apply relabel
+  ansible.builtin.command: restorecon -RF {{ item.item.path }}
+  loop: "{{ _relabel.results | selectattr('changed') | list }}"
+  loop_control: { label: "{{ item.item.path }}" }
+  changed_when: true

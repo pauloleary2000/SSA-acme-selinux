@@ -1,0 +1,5 @@
+---
+- name: Compliance and drift enforcement
+  hosts: "{{ ring | default('rhel_nodes') }}"
+  become: true
+  roles: [selinux_drift]

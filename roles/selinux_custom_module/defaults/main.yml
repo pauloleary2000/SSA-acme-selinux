@@ -1,0 +1,8 @@
+---
+# mode: build_on_host = compile the .te on the target (lab/demo)
+#       prebuilt      = download the .pp built and signed by CI (production)
+selinux_module_mode: prebuilt
+selinux_modules: []
+# - { name: acme_legacy, state: present }                                   # build_on_host
+# - { name: acme_legacy, state: present, url: https://artifacts.example.com/acme_legacy.pp, sha256: "<sum>" }
+selinux_module_staging: /var/lib/acme-selinux/modules

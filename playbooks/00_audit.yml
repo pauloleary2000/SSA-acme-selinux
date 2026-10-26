@@ -1,0 +1,5 @@
+---
+- name: Discovery - collect and rank SELinux denials (read-only)
+  hosts: "{{ ring | default('rhel_nodes') }}"
+  become: true
+  roles: [selinux_audit]

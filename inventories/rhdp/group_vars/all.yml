@@ -1,0 +1,6 @@
+---
+selinux_gate_since: this-hour        # window for "no new denials" gate before enforcing
+audit_since: this-month              # window for the discovery report
+# alert_webhook: https://itsm.example.com/hooks/selinux
+# lb_host: lb01.example.com          # enable LB drain/enable around the flip
+# lb_backend: webapp

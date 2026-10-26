@@ -1,0 +1,9 @@
+---
+audit_since: this-month
+dontaudit_mode: none        # none | expose | restore  (expose = semodule -DB, restore = semodule -B)
+selinux_audit_packages:
+  - audit
+  - policycoreutils
+  - policycoreutils-python-utils
+  - python3-libselinux
+  - python3-policycoreutils

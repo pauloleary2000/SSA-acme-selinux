@@ -1,0 +1,24 @@
+---
+- name: Tooling for building and managing policy modules
+  ansible.builtin.dnf:
+    name: [policycoreutils, checkpolicy]
+    state: present
+
+- name: Staging directory
+  ansible.builtin.file:
+    path: "{{ selinux_module_staging }}"
+    state: directory
+    mode: "0750"
+
+- name: Currently loaded modules
+  ansible.builtin.command: semodule -l
+  register: _loaded
+  changed_when: false
+  check_mode: false
+
+- name: Manage each module
+  ansible.builtin.include_tasks: module.yml
+  loop: "{{ selinux_modules }}"
+  loop_control:
+    loop_var: mod
+    label: "{{ mod.name }}"

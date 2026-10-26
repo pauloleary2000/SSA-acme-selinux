@@ -1,0 +1,14 @@
+---
+lb_backend: webapp
+health_cmd: curl -fsS http://localhost:8480/health
+selinux_fcontexts:
+  - { path: /srv/webapp/content, type: httpd_sys_content_t }
+  - { path: /srv/webapp/logs,    type: httpd_log_t }
+  - { path: /srv/webapp/data,    type: httpd_sys_rw_content_t }
+  - { path: /run/webapp,         type: httpd_var_run_t }      # dynamic socket directory
+selinux_ports:
+  - { port: 8480, proto: tcp, type: http_port_t }             # custom web port
+selinux_booleans:
+  - { name: httpd_can_network_connect_db, state: true }
+selinux_tmpfiles:                                              # label survives reboot/recreation
+  - { path: /run/webapp, owner: apache, group: apache, mode: "0755" }

@@ -1,0 +1,10 @@
+---
+selinux_fcontexts: []
+selinux_ports: []
+selinux_booleans: []
+selinux_tmpfiles: []
+selinux_permissive_domains: []     # per-domain permissive bridge while a module is developed
+# Live-fix overrides (survey on the Controller template); commit to Git afterwards
+selinux_fcontexts_extra: []
+selinux_ports_extra: []
+selinux_booleans_extra: []

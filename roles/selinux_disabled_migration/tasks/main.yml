@@ -1,0 +1,57 @@
+---
+- name: Gather SELinux facts
+  ansible.builtin.setup:
+    gather_subset: ['!all', '!min', selinux]
+
+- name: Only act on disabled hosts
+  ansible.builtin.meta: end_host
+  when: ansible_facts.selinux.status != 'disabled'
+
+- name: Policy packages present
+  ansible.builtin.dnf:
+    name: [selinux-policy-targeted, selinux-policy, policycoreutils, grubby]
+    state: present
+
+- name: Config file to PERMISSIVE (never straight to enforcing)
+  ansible.builtin.lineinfile:
+    path: /etc/selinux/config
+    regexp: '^SELINUX='
+    line: SELINUX=permissive
+
+- name: Policy type targeted
+  ansible.builtin.lineinfile:
+    path: /etc/selinux/config
+    regexp: '^SELINUXTYPE='
+    line: SELINUXTYPE=targeted
+
+- name: On RHEL 9 selinux=0 on the kernel command line is the real off switch; remove it
+  ansible.builtin.command: grubby --update-kernel=ALL --remove-args="selinux=0 enforcing=0"
+  changed_when: true
+
+- name: Clean /etc/default/grub as well
+  ansible.builtin.replace:
+    path: /etc/default/grub
+    regexp: '\s+(selinux=0|enforcing=0)'
+    replace: ''
+
+- name: Request full filesystem relabel on next boot
+  ansible.builtin.file:
+    path: /.autorelabel
+    state: touch
+    modification_time: preserve
+    access_time: preserve
+
+- name: Reboot and wait out the relabel (needs console access and a rollback kernel entry as safety net)
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ relabel_timeout }}"
+    test_command: getenforce
+
+- name: Confirm the host came up permissive and labeled
+  ansible.builtin.command: getenforce
+  register: _mode
+  changed_when: false
+  failed_when: _mode.stdout != 'Permissive'
+
+- name: Next step
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} is Permissive. Now run audit, remediate, enforce like any other host."

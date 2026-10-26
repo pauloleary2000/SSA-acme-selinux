@@ -1,0 +1,89 @@
+---
+# Config-as-code for Controller. Auth via env: CONTROLLER_HOST, CONTROLLER_USERNAME, CONTROLLER_PASSWORD
+# (or CONTROLLER_OAUTH_TOKEN). Verify parameter names against the ansible.controller version in your AAP release.
+- name: Configure AAP Controller objects
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    org: Default
+    repo_url: https://github.com/YOUR-ORG/acme-selinux.git
+    project_name: ACME SELinux
+    inventory_name: ACME RHEL Nodes          # create/sync separately from inventories/rhdp
+    machine_cred: RHDP Machine               # SSH + sudo credential (vaulted in Controller)
+    ee_name: ACME SELinux EE                 # built from execution-environment/
+    job_templates:
+      - { name: "SELinux 00 Audit",              playbook: playbooks/00_audit.yml }
+      - { name: "SELinux 10 Remediate CHECK",    playbook: playbooks/10_remediate.yml, job_type: check, diff: true }
+      - { name: "SELinux 10 Remediate APPLY",    playbook: playbooks/10_remediate.yml }
+      - { name: "SELinux 20 Enforce",            playbook: playbooks/20_enforce.yml }
+      - { name: "SELinux 30 Disabled Migration", playbook: playbooks/30_disabled_to_enforcing.yml }
+      - { name: "SELinux 40 Compliance REPORT",  playbook: playbooks/40_compliance.yml, job_type: check, diff: true }
+      - { name: "SELinux 40 Drift REMEDIATE",    playbook: playbooks/40_compliance.yml }
+      - { name: "SELinux 50 Custom Modules",     playbook: playbooks/50_custom_modules.yml }
+      - { name: "SELinux 90 Inject Fault (demo)", playbook: playbooks/90_inject_fault.yml }
+  tasks:
+    - name: Project from Git
+      ansible.controller.project:
+        name: "{{ project_name }}"
+        organization: "{{ org }}"
+        scm_type: git
+        scm_url: "{{ repo_url }}"
+        scm_branch: main
+        scm_update_on_launch: true
+        state: present
+
+    - name: Job templates
+      ansible.controller.job_template:
+        name: "{{ item.name }}"
+        organization: "{{ org }}"
+        project: "{{ project_name }}"
+        inventory: "{{ inventory_name }}"
+        playbook: "{{ item.playbook }}"
+        credentials: ["{{ machine_cred }}"]
+        execution_environment: "{{ ee_name }}"
+        job_type: "{{ item.job_type | default('run') }}"
+        diff_mode: "{{ item.diff | default(false) }}"
+        become_enabled: true
+        ask_limit_on_launch: true
+        ask_variables_on_launch: true
+        state: present
+      loop: "{{ job_templates }}"
+      loop_control: { label: "{{ item.name }}" }
+
+    - name: Rollout workflow with approval gate
+      ansible.controller.workflow_job_template:
+        name: SELinux Enforcement Rollout
+        organization: "{{ org }}"
+        ask_limit_on_launch: true
+        state: present
+        workflow_nodes:
+          - identifier: audit
+            unified_job_template: { name: "SELinux 00 Audit", type: job_template, organization: { name: "{{ org }}" } }
+            success_nodes: [plan]
+          - identifier: plan
+            unified_job_template: { name: "SELinux 10 Remediate CHECK", type: job_template, organization: { name: "{{ org }}" } }
+            success_nodes: [approve]
+          - identifier: approve
+            approval_node: { name: CISO approval of check-mode diff, timeout: 86400 }
+            success_nodes: [apply]
+          - identifier: apply
+            unified_job_template: { name: "SELinux 10 Remediate APPLY", type: job_template, organization: { name: "{{ org }}" } }
+            success_nodes: [canary]
+          - identifier: canary
+            unified_job_template: { name: "SELinux 20 Enforce", type: job_template, organization: { name: "{{ org }}" } }
+            limit: ring_canary
+            success_nodes: [wave1]
+          - identifier: wave1
+            unified_job_template: { name: "SELinux 20 Enforce", type: job_template, organization: { name: "{{ org }}" } }
+            limit: ring_wave1
+            success_nodes: [verify]
+          - identifier: verify
+            unified_job_template: { name: "SELinux 40 Compliance REPORT", type: job_template, organization: { name: "{{ org }}" } }
+
+    - name: Nightly drift report (schedule)
+      ansible.controller.schedule:
+        name: Nightly SELinux compliance report
+        unified_job_template: "SELinux 40 Compliance REPORT"
+        rrule: "DTSTART:20261101T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+        state: present

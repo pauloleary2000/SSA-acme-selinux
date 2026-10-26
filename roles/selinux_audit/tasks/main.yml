@@ -1,0 +1,53 @@
+---
+- name: Ensure audit and SELinux tooling is installed
+  ansible.builtin.dnf:
+    name: "{{ selinux_audit_packages }}"
+    state: present
+
+- name: Install auditd watch rules
+  ansible.builtin.include_tasks: rules.yml
+
+- name: Expose dontaudit rules so hidden denials are logged
+  ansible.builtin.command: semodule -DB
+  when: dontaudit_mode == 'expose'
+  changed_when: true
+
+- name: Restore dontaudit rules
+  ansible.builtin.command: semodule -B
+  when: dontaudit_mode == 'restore'
+  changed_when: true
+
+- name: Collect denials as "source target class permission" rows
+  ansible.builtin.shell: |
+    set -o pipefail
+    ausearch -m avc,user_avc,selinux_err -ts {{ audit_since }} -i 2>/dev/null \
+      | sed -nE 's/.*denied +\{ ([^}]*) \}.*scontext=([^ ]+) tcontext=([^ ]+) tclass=([^ ]+).*/\2 \3 \4 \1/p'
+  register: avc_raw
+  changed_when: false
+  failed_when: avc_raw.rc not in [0, 1]     # rc 1 = no matches
+  check_mode: false
+
+- name: Reduce SELinux contexts to their type
+  ansible.builtin.set_fact:
+    avc_keys: >-
+      {{ avc_raw.stdout_lines
+         | map('regex_replace', '\\w+:\\w+:(\\w+):\\S+', '\\1')
+         | list }}
+
+- name: Fleet-wide blast radius (denials grouped by source, target, class, permission)
+  ansible.builtin.debug:
+    msg: "{{ item.value }}x  {{ item.key }}"
+  loop: >-
+    {{ ansible_play_hosts
+       | map('extract', hostvars, 'avc_keys') | flatten
+       | community.general.counter
+       | dict2items | sort(attribute='value', reverse=true) }}
+  loop_control:
+    label: "{{ item.key }}"
+  run_once: true
+
+- name: Expose total to the workflow (approval node / gating)
+  ansible.builtin.set_stats:
+    data:
+      selinux_avc_total: "{{ ansible_play_hosts | map('extract', hostvars, 'avc_keys') | map('length') | sum }}"
+  run_once: true

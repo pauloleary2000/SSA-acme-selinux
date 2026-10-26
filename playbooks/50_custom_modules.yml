@@ -1,0 +1,9 @@
+---
+- name: Manage custom type enforcement modules
+  hosts: "{{ ring | default('rhel_nodes') }}"
+  become: true
+  vars:
+    selinux_module_mode: build_on_host     # lab; use prebuilt + url + sha256 in production
+    selinux_modules:
+      - { name: acme_legacy, state: present }
+  roles: [selinux_custom_module]

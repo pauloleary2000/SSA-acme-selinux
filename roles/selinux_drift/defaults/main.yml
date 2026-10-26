@@ -1,0 +1,4 @@
+---
+run_oscap: false
+oscap_profile: xccdf_org.ssgproject.content_profile_pci-dss
+oscap_content: /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml

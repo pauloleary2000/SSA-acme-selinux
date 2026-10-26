@@ -1,0 +1,7 @@
+## Watch the controls an admin would touch to weaken SELinux
+-w /etc/selinux/ -p wa -k selinux_config
+-w /usr/sbin/setenforce -p x -k selinux_setenforce
+-w /usr/sbin/semanage -p x -k selinux_policy_change
+-w /usr/sbin/semodule -p x -k selinux_policy_change
+-w /usr/sbin/setsebool -p x -k selinux_policy_change
+## The kernel itself emits type=MAC_STATUS ... enforcing=0 on every mode switch

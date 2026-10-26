@@ -1,0 +1,4 @@
+---
+- name: apply tmpfiles
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/acme-selinux.conf
+  changed_when: true

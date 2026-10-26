@@ -1,0 +1,6 @@
+---
+- name: Move SELINUX=disabled hosts to permissive safely (relabel + reboot), one at a time
+  hosts: "{{ ring | default('rhel_nodes') }}"
+  become: true
+  serial: 1
+  roles: [selinux_disabled_migration]

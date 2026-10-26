@@ -1,0 +1,98 @@
+---
+- name: Gather SELinux facts
+  ansible.builtin.setup:
+    gather_subset: ['!all', '!min', selinux]
+
+- name: Stop if SELinux is disabled (use the disabled-migration playbook first)
+  ansible.builtin.assert:
+    that: ansible_facts.selinux.status == 'enabled'
+    fail_msg: "{{ inventory_hostname }} is disabled. Run playbooks/30_disabled_to_enforcing.yml first."
+
+- name: Skip hosts that are already enforcing
+  ansible.builtin.meta: end_host
+  when: ansible_facts.selinux.mode == 'enforcing'
+
+- name: Gate - no denials in the observation window
+  ansible.builtin.command: ausearch -m avc,user_avc,selinux_err -ts {{ selinux_gate_since }}
+  register: _gate
+  changed_when: false
+  failed_when: >-
+    _gate.rc not in [0, 1] or
+    (_gate.rc == 0 and not (selinux_force | bool))
+  check_mode: false
+
+- name: Drain host from load balancer
+  community.general.haproxy:
+    backend: "{{ lb_backend }}"
+    host: "{{ inventory_hostname_short }}"
+    state: drain
+    wait: true
+    socket: /var/lib/haproxy/stats
+  delegate_to: "{{ lb_host }}"
+  when: lb_host is defined
+
+- name: Flip to enforcing with automatic safety net
+  block:
+    - name: Pre-flip health check
+      ansible.builtin.command: "{{ health_cmd }}"
+      changed_when: false
+      check_mode: false
+
+    - name: Record flip time
+      ansible.builtin.command: date '+%m/%d/%Y %H:%M:%S'
+      register: _flip
+      changed_when: false
+      check_mode: false
+
+    - name: Set SELinux enforcing (runtime and /etc/selinux/config)
+      ansible.posix.selinux:
+        policy: targeted
+        state: enforcing
+
+    - name: Post-flip health check
+      ansible.builtin.command: "{{ health_cmd }}"
+      register: _post
+      until: _post.rc == 0
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+      changed_when: false
+      check_mode: false
+
+    - name: No new denials since the flip
+      ansible.builtin.command: ausearch -m avc,user_avc,selinux_err -ts {{ _flip.stdout.split()[0] }} {{ _flip.stdout.split()[1] }}
+      register: _after
+      changed_when: false
+      failed_when: _after.rc not in [0, 1] or _after.rc == 0
+      check_mode: false
+
+    - name: Return host to load balancer
+      community.general.haproxy:
+        backend: "{{ lb_backend }}"
+        host: "{{ inventory_hostname_short }}"
+        state: enabled
+        socket: /var/lib/haproxy/stats
+      delegate_to: "{{ lb_host }}"
+      when: lb_host is defined
+
+  rescue:
+    - name: SAFETY NET - return host to permissive (kept drained)
+      ansible.posix.selinux:
+        policy: targeted
+        state: permissive
+
+    - name: Alert
+      ansible.builtin.uri:
+        url: "{{ alert_webhook }}"
+        method: POST
+        body_format: json
+        body:
+          host: "{{ inventory_hostname }}"
+          event: selinux_enforce_rolled_back
+          job: "{{ awx_job_id | default('local') }}"
+      delegate_to: localhost
+      become: false
+      when: alert_webhook is defined
+
+    - name: Fail the host so the wave stops
+      ansible.builtin.fail:
+        msg: "Enforcing failed health or denial checks on {{ inventory_hostname }}; reverted to permissive."

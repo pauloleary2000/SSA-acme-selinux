@@ -1,0 +1,40 @@
+---
+# Production path: auditd -> audisp-syslog -> rsyslog (omkafka, JSON template) -> Kafka -> EDA.
+# JSON template expected: {"host":"%hostname%","msg":"%msg%"}   (host must equal the inventory name)
+- name: SELinux drift remediation
+  hosts: all
+  sources:
+    - ansible.eda.kafka:
+        host: kafka.example.com
+        port: 9092
+        topic: audit-selinux
+        group_id: eda-selinux
+
+  rules:
+    - name: Enforcing was switched off
+      condition: event.body.msg is search("MAC_STATUS.*enforcing=0", ignorecase=true)
+      throttle:
+        once_within: 2 minutes
+        group_by_attributes: [event.body.host]
+      action:
+        run_job_template:
+          name: SELinux 40 Drift REMEDIATE
+          organization: Default
+          job_args:
+            limit: "{{ event.body.host }}"
+
+    - name: Policy tooling executed outside change window
+      condition: event.body.msg is search("key=selinux_(setenforce|policy_change)", ignorecase=true)
+      throttle:
+        once_within: 5 minutes
+        group_by_attributes: [event.body.host]
+      action:
+        run_job_template:
+          name: SELinux 40 Compliance REPORT
+          organization: Default
+          job_args:
+            limit: "{{ event.body.host }}"
+
+# Lab fallback if Kafka is unavailable: swap the source for
+#   - ansible.eda.webhook: { host: 0.0.0.0, port: 5000 }
+# and POST {"host": "...", "msg": "..."} with curl from the target. Same rules, event.payload instead of event.body.

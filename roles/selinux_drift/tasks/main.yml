@@ -1,0 +1,50 @@
+---
+# Run as a CHECK job for a drift report, as a normal job to remediate.
+- name: Ensure audit tooling and watch rules
+  ansible.builtin.include_role:
+    name: selinux_audit
+    tasks_from: rules.yml
+
+- name: SELinux must be enforcing, targeted policy, runtime and persistent
+  ansible.posix.selinux:
+    policy: targeted
+    state: enforcing
+
+- name: Detect kernel arguments that disable SELinux
+  ansible.builtin.shell: grubby --info=ALL | grep -E 'args=.*(selinux=0|enforcing=0)' || true
+  register: _bad_args
+  changed_when: _bad_args.stdout | length > 0
+  check_mode: false
+
+- name: Remove SELinux-disabling kernel arguments
+  ansible.builtin.command: grubby --update-kernel=ALL --remove-args="selinux=0 enforcing=0"
+  when: _bad_args is changed
+  changed_when: true
+
+- name: Report pending reboot for kernel argument change
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: kernel args fixed; takes effect at next reboot (schedule in maintenance window)."
+  when: _bad_args is changed
+
+- name: OpenSCAP PCI-DSS evaluation (optional)
+  when: run_oscap | bool
+  block:
+    - name: Install scanner and content
+      ansible.builtin.dnf:
+        name: [openscap-scanner, scap-security-guide]
+        state: present
+
+    - name: Evaluate profile
+      ansible.builtin.command: >-
+        oscap xccdf eval --profile {{ oscap_profile }}
+        --results /tmp/oscap-{{ inventory_hostname }}.xml {{ oscap_content }}
+      register: _oscap
+      failed_when: _oscap.rc not in [0, 2]     # 2 = some rules failed, report still valid
+      changed_when: false
+      check_mode: false
+
+    - name: Fetch results for the evidence archive
+      ansible.builtin.fetch:
+        src: /tmp/oscap-{{ inventory_hostname }}.xml
+        dest: reports/
+        flat: true
